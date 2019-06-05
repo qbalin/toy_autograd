@@ -220,7 +220,7 @@ class Tensor:
         value_i = j // col_value
         value_j = j % col_value
 
-        jacobian[i, j] = 1. / lin_lhs
+        jacobian[i, j] = 1. / lin
 
 
     return jacobian
