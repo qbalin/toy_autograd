@@ -48,27 +48,28 @@ class Tensor:
     if self.requires_grad == False:
       return
 
-    self.grad = jacobian_vector
+    print(jacobian_vector)
+    if self.grad is None:
+      self.grad = np.zeros(self.value.shape)
 
-    jacobian_vector = jacobian_vector.reshape((jacobian_vector.shape[0] * jacobian_vector.shape[1], 1))
+    self.grad += jacobian_vector.reshape(self.value.shape)
 
     if self.grad_fn == 'dot':
-      self.lhs.backwards((self.dot_jacobian_wrt_lhs() @ jacobian_vector).reshape(self.lhs.value.shape))
-      self.rhs.backwards((self.dot_jacobian_wrt_rhs() @ jacobian_vector).reshape(self.rhs.value.shape))
+      self.lhs.backwards(self.dot_jacobian_wrt_lhs() @ jacobian_vector)
+      self.rhs.backwards(self.dot_jacobian_wrt_rhs() @ jacobian_vector)
 
     if self.grad_fn == 'add':
-      self.lhs.backwards((self.add_jacobian_wrt_mat(self.lhs.value) @ jacobian_vector).reshape(self.lhs.value.shape))
+      self.lhs.backwards(self.add_jacobian_wrt_mat(self.lhs.value) @ jacobian_vector)
       if isinstance(self.rhs, Tensor):
-        self.rhs.backwards((self.add_jacobian_wrt_mat(self.rhs.value) @ jacobian_vector).reshape(self.rhs.value.shape))
+        self.rhs.backwards(self.add_jacobian_wrt_mat(self.rhs.value) @ jacobian_vector)
 
     if self.grad_fn == 'mul':
-      self.lhs.backwards((self.mul_jacobian_wrt_mat(self.lhs.value, self.rhs) @ jacobian_vector).reshape(self.lhs.value.shape))
+      self.lhs.backwards(self.mul_jacobian_wrt_mat(self.lhs.value, self.rhs) @ jacobian_vector)
       if isinstance(self.rhs, Tensor):
-        self.rhs.backwards((self.mul_jacobian_wrt_mat (self.rhs.value, self.lhs) @ jacobian_vector).reshape(self.rhs.value.shape))
+        self.rhs.backwards(self.mul_jacobian_wrt_mat(self.rhs.value, self.lhs) @ jacobian_vector)
 
     if self.grad_fn == 'mean':
-      print((self.mean_jacobian() @ jacobian_vector).reshape(self.lhs.value.shape))
-      self.lhs.backwards((self.mean_jacobian() @ jacobian_vector).reshape(self.lhs.value.shape))
+      self.lhs.backwards(self.mean_jacobian() @ jacobian_vector)
 
   def dot_jacobian_wrt_rhs(self):
     # Z = X * Y
