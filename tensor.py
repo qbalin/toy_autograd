@@ -55,181 +55,76 @@ class Tensor:
     self.grad += jacobian_vector.reshape(self.value.shape)
 
     if self.grad_fn == 'dot':
-      self.lhs.backwards(self.dot_jacobian_wrt_lhs() @ jacobian_vector)
-      self.rhs.backwards(self.dot_jacobian_wrt_rhs() @ jacobian_vector)
+      self.lhs.backwards(self.calculate_jacobian(self.lhs.value, self.value, self.rhs.value, self.dot_wrt_lhs_derivative_fn) @ jacobian_vector)
+      self.rhs.backwards(self.calculate_jacobian(self.rhs.value, self.value, self.lhs.value, self.dot_wrt_rhs_derivative_fn) @ jacobian_vector)
 
     if self.grad_fn == 'add':
-      self.lhs.backwards(self.add_jacobian_wrt_mat(self.lhs.value) @ jacobian_vector)
+      self.lhs.backwards(self.calculate_jacobian(self.lhs.value, self.value, None, self.add_derivative_fn) @ jacobian_vector)
       if isinstance(self.rhs, Tensor):
-        self.rhs.backwards(self.add_jacobian_wrt_mat(self.rhs.value) @ jacobian_vector)
+        self.rhs.backwards(self.calculate_jacobian(self.lhs.value, self.value, None, self.add_derivative_fn) @ jacobian_vector)
 
     if self.grad_fn == 'mul':
-      self.lhs.backwards(self.mul_jacobian_wrt_mat(self.lhs.value, self.rhs) @ jacobian_vector)
+      self.lhs.backwards(self.calculate_jacobian(self.lhs.value, self.value, self.rhs.value if isinstance(self.rhs, Tensor) else self.rhs, self.mul_derivative_fn) @ jacobian_vector)
       if isinstance(self.rhs, Tensor):
-        self.rhs.backwards(self.mul_jacobian_wrt_mat(self.rhs.value, self.lhs) @ jacobian_vector)
+        self.rhs.backwards(self.calculate_jacobian(self.rhs.value, self.value, self.lhs.value if isinstance(self.lhs, Tensor) else self.lhs, self.mul_derivative_fn) @ jacobian_vector)
 
     if self.grad_fn == 'mean':
-      self.lhs.backwards(self.mean_jacobian() @ jacobian_vector)
+      self.lhs.backwards(self.calculate_jacobian(self.lhs.value, self.value, None, self.mean_derivative_fn) @ jacobian_vector)
 
-  def dot_jacobian_wrt_rhs(self):
-    # Z = X * Y
-    # We want to compute dZ / dY
-    # Y is splat horizontally, and Z vertically
+  def calculate_jacobian(self, x, y, other, derivative_fn):
+    # y = f(x, other_tensor)
+    # We want to compute dy / dx
+    # y is splat horizontally, and x vertically:
 
-    # Y
-    lin_rhs = self.rhs.value.shape[0]
-    col_rhs = self.rhs.value.shape[1]
+    # x
+    lin_x = x.shape[0]
+    col_x = x.shape[1]
 
-    # Z
-    lin_value = self.value.shape[0]
-    col_value = self.value.shape[1]
+    # y
+    lin_y = y.shape[0]
+    col_y = y.shape[1]
 
-
-    lin = lin_rhs * col_rhs
-    col = lin_value * col_value
-
-    jacobian = np.zeros((lin, col))
-    for i in range(lin):
-      for j in range(col):
-        rhs_i = i // col_rhs
-        rhs_j = i % col_rhs
-
-        value_i = j // col_value
-        value_j = j % col_value
-
-        if rhs_j != value_j:
-          jacobian[i, j] = 0
-        else:
-          jacobian[i, j] = self.lhs.value[value_i, rhs_i]
-
-    return jacobian
-
-  def dot_jacobian_wrt_lhs(self):
-    # Z = X * Y
-    # We want to compute dZ / dX
-    # X is splat horizontally, and Z vertically
-
-    # X
-    lin_lhs = self.lhs.value.shape[0]
-    col_lhs = self.lhs.value.shape[1]
-
-    # Z
-    lin_value = self.value.shape[0]
-    col_value = self.value.shape[1]
-
-
-    lin = lin_lhs * col_lhs
-    col = lin_value * col_value
+    # Number of lines and columns of the jacobian
+    lin = lin_x * col_x
+    col = lin_y * col_y
 
     jacobian = np.zeros((lin, col))
     for i in range(lin):
+      x_i = i // col_x
+      x_j = i % col_x
+
       for j in range(col):
-        lhs_i = i // col_lhs
-        lhs_j = i % col_lhs
+        y_i = j // col_y
+        y_j = j % col_y
 
-        value_i = j // col_value
-        value_j = j % col_value
-
-        if lhs_i != value_i:
-          jacobian[i, j] = 0
-        else:
-          jacobian[i, j] = self.rhs.value[lhs_j, value_j]
+        jacobian[i, j] = derivative_fn(x, y, other, x_i, x_j, y_i, y_j)
 
     return jacobian
 
-  def add_jacobian_wrt_mat(self, mat):
-    # Z = X + Y
-    # We want to compute dZ / dY
-    # Y is splat horizontally, and Z vertically
+  def dot_wrt_lhs_derivative_fn(self, x, y, other, x_i, x_j, y_i, y_j):
+    if x_i != y_i:
+      return 0
+    else:
+      return other[x_j, y_j]
 
-    # Y
-    lin_mat = mat.shape[0]
-    col_mat = mat.shape[1]
+  def dot_wrt_rhs_derivative_fn(self, x, y, other, x_i, x_j, y_i, y_j):
+    if x_j != y_j:
+      return 0
+    else:
+      return other[y_i, x_i]
 
-    # Z
-    lin_value = self.value.shape[0]
-    col_value = self.value.shape[1]
+  def add_derivative_fn(self, x, y, other, x_i, x_j, y_i, y_j):
+    if x_i == y_i and x_j == y_j:
+      return 1
+    else:
+      return 0
 
+  def mul_derivative_fn(self, x, y, other, x_i, x_j, y_i, y_j):
+    if x_i == y_i and x_j == y_j:
+      return other[x_i, x_j] if isinstance(other, np.ndarray) else other
+    else:
+      return 0
 
-    lin = lin_mat * col_mat
-    col = lin_value * col_value
-
-    jacobian = np.zeros((lin, col))
-    for i in range(lin):
-      for j in range(col):
-        mat_i = i // col_mat
-        mat_j = i % col_mat
-
-        value_i = j // col_value
-        value_j = j % col_value
-
-        if mat_i == value_i and mat_j == value_j:
-          jacobian[i, j] = 1
-        else:
-          jacobian[i, j] = 0
-
-    return jacobian
-
-  def mul_jacobian_wrt_mat(self, mat, tensor_or_value):
-    # Z = X * Y
-    # We want to compute dZ / dY
-    # Y is splat horizontally, and Z vertically
-
-
-    lin_mat = mat.shape[0]
-    col_mat = mat.shape[1]
-
-    lin = lin_mat * col_mat
-    col = lin
-
-    jacobian = np.zeros((lin, col))
-    for i in range(lin):
-      mat_i = i // col_mat
-      mat_j = i % col_mat
-
-      for j in range(col):
-        if i == j:
-          jacobian[i, j] = tensor_or_value.value[mat_i, mat_j] if isinstance(tensor_or_value, Tensor) else tensor_or_value
-        else:
-          jacobian[i, j] = 0
-
-    return jacobian
-
-  def mean_jacobian(self):
-    # Z = X * Y
-    # We want to compute dZ / dY
-    # Y is splat horizontally, and Z vertically
-
-    # Y
-    lin_lhs = self.lhs.value.shape[0]
-    col_lhs = self.lhs.value.shape[1]
-
-    # Z
-    lin_value = self.value.shape[0]
-    col_value = self.value.shape[1]
-
-
-    lin = lin_lhs * col_lhs
-    col = lin_value * col_value
-
-    jacobian = np.zeros((lin, col))
-    for i in range(lin):
-      for j in range(col):
-        rhs_i = i // col_lhs
-        rhs_j = i % col_lhs
-
-        value_i = j // col_value
-        value_j = j % col_value
-
-        jacobian[i, j] = 1. / lin
-
-
-    return jacobian
-
-
-
-
-
-
-
+  def mean_derivative_fn(self, x, y, other, x_i, x_j, y_i, y_j):
+    return 1. / x.size
 
